@@ -1,0 +1,58 @@
+# The gatekeeper rules as deployed on my Raspberry Pi (October 2026).
+# In the Engine they live in two files that are merged at load time:
+#   config/constitution.toml  [gatekeeper] + shared deny/allow rules (in Git)
+#   config/local.toml          Pi-only extra deny rules (git-ignored)
+# Here they are combined into one file. Order of evaluation: deny → allow → unknown.
+# `tool` and `pattern` are regular expressions; `pattern` is searched in the command / file path / URL.
+
+[gatekeeper]
+workspace = "~"                 # Edit/Write outside this folder are always refused
+unknown = "defer"               # actions no rule covers: "defer" = Claude Code's auto mode decides; "phone" = ask the owner
+wait_seconds = 600              # how long an action waits for an answer (phone mode)
+on_timeout = "deny"             # "deny" (safe) or "allow"
+ntfy_server = "https://ntfy.sh"
+ntfy_topic = ""                 # set HQ_NTFY_TOPIC in the environment instead: a long random name
+
+# ---- shared deny rules (constitution.toml) ----
+[[gatekeeper.deny]]
+tool = "Bash"
+pattern = '(^|[;&|\s])(sudo|su|rm\s+-[a-zA-Z]*r[a-zA-Z]*f|mkfs|dd\s+if=|shutdown|reboot|chmod\s+-R\s+777)\b'
+why = "destructive or privileged command"
+[[gatekeeper.deny]]
+tool = "Bash"
+pattern = '(curl|wget)[^|]*\|\s*(ba|z)?sh|git\s+push\s+.*(--force|-f\b)|git\s+reset\s+--hard\s+origin'
+why = "pipes remote code into a shell, or rewrites published history"
+[[gatekeeper.deny]]
+tool = ".*"
+pattern = '\.env\b|id_rsa|id_ed25519|\.ssh/|credentials|\.aws/'
+why = "touches secrets"
+
+# ---- Pi-only deny rules (local.toml) ----
+[[gatekeeper.deny]]
+tool = "Bash"
+pattern = '(^|[;&|\s])git\s+(push|merge|rebase|worktree)\b|(^|[;&|\s])gh\s+pr\s+merge'
+why = "agents commit only; HQ pushes branches after tests pass and Djeddi merges"
+[[gatekeeper.deny]]
+tool = "Bash"
+pattern = '(hq\.sh|-m\s+hq)\s+(dev|kill|unkill|update)\b|memory/KILL'
+why = "only Djeddi controls the dev loop, updates and the kill switch"
+[[gatekeeper.deny]]
+tool = "Edit|Write|NotebookEdit|Bash"
+pattern = '/hq-system/(config|memory)/'
+why = "HQ's live configuration and memory are not edited by agents (they work in .devloop/ copies)"
+
+# ---- allow rules (constitution.toml) ----
+[[gatekeeper.allow]]
+tool = "Read|Glob|Grep|LS|TodoWrite|Task.*"
+why = "read-only"
+[[gatekeeper.allow]]
+tool = "Edit|Write|NotebookEdit"
+pattern = '/hq-system/'
+why = "edits inside the HQ project"
+[[gatekeeper.allow]]
+tool = "Bash"
+pattern = '^\s*(ls|pwd|cat|head|tail|wc|grep|rg|find|echo|which|date|df|free|uptime|python3 -m unittest|\./hq\.sh|python3 -m hq|git (status|diff|log|show|add|commit|branch|checkout -b|switch -c|fetch|pull --ff-only))\b[^;&|`$]*$'
+why = "safe inspection, tests, HQ commands, local git"
+[[gatekeeper.allow]]
+tool = "WebSearch|WebFetch"
+why = "public research"
